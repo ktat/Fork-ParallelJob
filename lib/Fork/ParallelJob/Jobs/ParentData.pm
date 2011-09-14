@@ -52,3 +52,24 @@ sub num_of_jobs {
 }
 
 1;
+
+=head1 NAME
+
+Fork::ParallelJob::Jobs::ParentData -- jobs object for Fork::ParallelJob to stroe in ParentData
+
+=head1 ACKNOWLEDGEMENTS
+
+
+=head1 LICENSE AND COPYRIGHT
+
+Copyright 2011 Ktat.
+
+This program is free software; you can redistribute it and/or modify it
+under the terms of either: the GNU General Public License as published
+by the Free Software Foundation; or the Artistic License.
+
+See http://dev.perl.org/licenses/ for more information.
+
+=cut
+
+1; # Endo of Fork::ParallelJob::Job::ParentData

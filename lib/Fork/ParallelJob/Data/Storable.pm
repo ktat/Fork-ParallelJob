@@ -4,6 +4,7 @@ use parent qw/Fork::ParallelJob::Data/;
 use Storable qw/nstore retrieve nstore_fd fd_retrieve thaw freeze/;
 use strict;
 use warnings;
+
 sub _get {
   my ($self, $filename) = @_;
   local $Storable::Deparse = 1;
@@ -29,5 +30,7 @@ sub _set {
     nstore($status, $filename);
   }
 }
+
+sub can_job_store { 1 }
 
 1; # Endo of Fork::ParallelJob::Data::Storable

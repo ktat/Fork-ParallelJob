@@ -58,7 +58,7 @@ sub _fh {
 
 sub lock_store {
   my ($self, $code) = @_;
-  $self->set($code->($self->get));
+  $self->lock(sub { $self->set($code->($self->get)) });
 }
 
 sub lock ($&) {
@@ -101,6 +101,8 @@ sub get_all {
   }
   return \@data;
 }
+
+sub can_job_store { 0 }
 
 =head1 NAME
 
@@ -146,12 +148,32 @@ get data.
 
 This method lock file while coderef is done.
 
+=head2 lock_store
+
+ $data->lock_store(
+    sub {
+      my $data = shift;
+      $data->{test} = 'test'
+      $data;
+    }
+ });
+
+The given coderef is execute whle locking.
+arguments of coderef is data and coderef must return modified data.
+returned value is atuomatically set.
+
 =head2 get_all
 
  my $data = $data->get_all;
  foreach my $d (@$data) {
    # ...
  }
+
+=head2 can_job_store
+
+ $data->can_job_store
+
+It returns 1, if the storage can store job.
 
 get all data.
 

@@ -5,7 +5,7 @@ use JSON::XS;
 use strict;
 use warnings;
 
-my $json = JSON->new;
+my $json = JSON::XS->new;
 
 sub _get {
   my ($self, $filename) = @_;
@@ -14,7 +14,7 @@ sub _get {
   my $data = <$fh>;
   return $data ? $json->decode($data) : {};
 }
-use Data::Dumper;
+
 sub _set {
   my ($self, $filename, $status) = @_;
   my $fh = $self->{fh} || $self->_fh($filename);
