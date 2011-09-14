@@ -1,0 +1,24 @@
+package Fork::ParallelJob::Data::JSON;
+
+use parent qw/Fork::ParallelJob::Data/;
+use JSON::XS;
+use strict;
+use warnings;
+
+my $json = JSON->new;
+
+sub _get {
+  my ($self, $filename) = @_;
+  my $fh = $self->{fh} || $self->_fh($filename);
+  local $/;
+  my $data = <$fh>;
+  return $data ? $json->decode($data) : {};
+}
+use Data::Dumper;
+sub _set {
+  my ($self, $filename, $status) = @_;
+  my $fh = $self->{fh} || $self->_fh($filename);
+  print $fh $json->encode($status);
+}
+
+1; # Endo of Fork::ParallelJob::Data::JSON
