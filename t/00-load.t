@@ -3,8 +3,8 @@
 use Test::More tests => 1;
 
 BEGIN {
-    use_ok( 'Fork::ParalellJob' ) || print "Bail out!
+    use_ok( 'Fork::ParallelJob' ) || print "Bail out!
 ";
 }
 
-diag( "Testing Fork::ParalellJob $Fork::ParalellJob::VERSION, Perl $], $^X" );
+diag( "Testing Fork::ParallelJob $Fork::ParallelJob::VERSION, Perl $], $^X" );

@@ -1,11 +1,23 @@
 use inc::Module::Install;
 
-name     'Fork-ParalellJob';
-all_from 'lib/Fork/ParalellJob.pm';
+name     'Fork-ParallelJob';
+all_from 'lib/Fork/ParallelJob.pm';
 author   q{Ktat <ktat@cpan.org>};
 license  'perl';
 
 build_requires 'Test::More';
+
+requires
+    'Class::Accessor' => 0,
+    'Class::Load' => 0,
+    'Data::Dumper' => 0,
+    'Fcntl' => 0,
+    'JSON::XS' => 0,
+    'POSIX' => 0,
+    'Storable' => 0,
+    'Time::HiRes' => 0,
+    'YAML::XS' => 0,
+    'parent' => 0;
 
 auto_install;
 

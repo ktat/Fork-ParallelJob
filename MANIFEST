@@ -2,7 +2,13 @@ Changes
 MANIFEST
 Makefile.PL
 README
-lib/Fork/ParalellJob.pm
+lib/Fork/ParallelJob.pm
+lib/Fork/ParallelJob/Data.pm
+lib/Fork/ParallelJob/Data/YAML.pm
+lib/Fork/ParallelJob/Data/Storable.pm
+lib/Fork/ParallelJob/Data/JSON.pm
+lib/Fork/ParallelJob/Jobs.pm
+lib/Fork/ParallelJob/Jobs/ParentData.pm
 t/00-load.t
 t/manifest.t
 t/pod-coverage.t
