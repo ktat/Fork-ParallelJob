@@ -5,27 +5,28 @@ use warnings;
 
 sub new {
   my $class = shift;
-  bless [], $class;
+  bless { jobs => [], data => []}, $class;
 }
 
 sub add {
-  my ($self, $job) = @_;
-  push @$self, {(ref $job eq 'CODE' ? ($self->num_of_jobs + 1, $job) : %$job)};
+  my ($self, $job, $data) = @_;
+  push @{$self->{jobs}}, {(ref $job eq 'CODE' ? ($self->num_of_jobs + 1, $job) : %$job)};
+  push @{$self->{data}}, $data;
 }
 
 sub add_multi {
-  my ($self, @jobs) = @_;
-  $self->add($_) for @jobs;
+  my ($self, $jobs, $data) = @_;
+  $self->add($jobs->[$_], $data->[$_]) for 0 .. $#{$jobs};
 }
 
 sub take {
   my ($self) = @_;
-  shift @$self;
+  (shift @{$self->{jobs}}, shift @{$self->{data}});
 }
 
 sub num_of_jobs {
   my ($self) = @_;
-  scalar @{$self};
+  scalar @{$self->{jobs}};
 }
 
 =head1 NAME
@@ -50,7 +51,7 @@ Fork::ParallelJob::Jobs -- jobs object for Fork::ParallelJob
 
  $jobs->add($job);
 
-add job.
+add job. $job is code ref or hash ref like {key => sub {}}.
 
 =head2 add_multi
 

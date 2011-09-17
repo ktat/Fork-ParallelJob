@@ -4,12 +4,13 @@ use POSIX ':sys_wait_h', 'setsid';
 use Class::Load qw/load_class/;
 use Time::HiRes qw/sleep/;
 use strict;
+use Clone;
 use warnings;
 use Fork::ParallelJob::Jobs;
 use Class::Accessor::Lite
   (
-   rw => [qw/nowait setsid retry max_process close wait_sleep/],
-   r  => [qw/name pid count current child_data_format parent_data_format is_child pids/],
+   rw => [qw/nowait retry max_process close wait_sleep tmp_name/],
+   r  => [qw/name pid count current child_data_format root_data root_data_format is_child pids/],
   );
 
 our $VERSION = '0.01';
@@ -18,6 +19,7 @@ sub new {
   my $class = shift;
   my $self = bless
     {
+     tmp_name           => '/tmp/fork-paralleljob',
      name               => '',
      close              => 0,
      max_process        => 0,
@@ -25,11 +27,11 @@ sub new {
      setsid             => 0,
      pid                => $$,
      data_format        => 'Storable',
-     parent_data_format => '',
+     root_data_format   => '',
      child_data_format  => '',
      wait_sleep         => 0.5,
      nowait             => 0,
-     jobs_in_parent     => 0,
+     jobs_in_root       => 0,
      @_,
      pid                => $$,
      pids               => [],
@@ -37,26 +39,30 @@ sub new {
      current            => 0,
     }, $class;
 
-  $self->{name}      ||= $$;
+  # wrong combination : max_process & nowait
+  # wrong combination : max_process & setsid
 
-  for my $key ('parent', 'child') {
+  $self->{name} ||= $$;
+
+  for my $key ('root', 'child') {
     next if $self->{$key . '_data'};
 
     my $data_class = 'Fork::ParallelJob::Data::' . ($self->{$key . '_data_format'} || $self->{data_format});
     load_class($data_class);
-    $self->{$key . '_data'}  ||= $data_class->new(base_dir => "/tmp/fork-$key-"  . $self->{'name'});
+    $self->{$key . '_data'}  ||= $data_class->new(base_dir => $self->tmp_name . "-$key-"  . $self->{'name'});
   }
+  $self->{parent_data} ||= $self->root_data;
 
   unless ($self->{jobs}) {
-    if ( $self->{jobs_in_parent} ) {
-      Carp::croak(ref($self->{'parent_data'}) . " cannot store job.") unless $self->{'parent_data'}->can_job_store;
-      load_class('Fork::ParallelJob::Jobs::ParentData');
-      $self->{jobs} = Fork::ParallelJob::Jobs::ParentData->new($self->{'parent_data'});
+    if ( $self->{jobs_in_root} ) {
+      Carp::croak(ref($self->{'root_data'}) . " cannot store job.") unless $self->{'root_data'}->can_job_store;
+      load_class('Fork::ParallelJob::Jobs::RootData');
+      $self->{jobs} = Fork::ParallelJob::Jobs::RootData->new($self->{'root_data'});
     } else {
       $self->{jobs} = Fork::ParallelJob::Jobs->new;
     }
     if (! $self->{is_child}) {
-      $self->parent_data->set_worker_id($self->{'name'});
+      $self->root_data->set_worker_id($self->{'name'});
     }
   }
   return $self;
@@ -64,16 +70,23 @@ sub new {
 
 sub child {
   my ($self) = shift;
-  my $o = (ref $self)->new(%$self, @_, is_child => 1);
+  my %opt = @_;
+  my $clone = Clone::clone {%$self};
+  Carp::carp("'name' option is autmatically defined. ignored.") if exists $opt{name};
+  delete $clone->{jobs};
+  my $o = (ref $self)->new(%$clone, %opt, is_child => 1);
+  $o->{parent_data} = $clone->{child_data};
+  $o->child_data->worker_id($$);
+  $o->{name} = $o->{name} . '-child-' . $$;
   return $o;
 }
 
 sub add_job {
-  my ($self, @jobs) = @_;
-  if (@jobs > 1) {
-    $self->{jobs}->add_multi(@jobs);
+  my ($self, $jobs, $data) = @_;
+  if (ref $jobs eq 'ARRAY') {
+    $self->{jobs}->add_multi($jobs, $data);
   } else {
-    $self->{jobs}->add(shift @jobs);
+    $self->{jobs}->add($jobs, $data);
   }
 }
 
@@ -87,29 +100,39 @@ sub has_job {
   $self->{jobs}->num_of_jobs;
 }
 
-sub start_job {
-  my ($self, $job, $data) = @_;
-  $self->do_fork([$job], [$data]);
-}
-
 sub do_fork {
   my $self = shift;
-  my $check = pop if ref $_[-1] eq 'CODE';
+  my $opt = pop if ref $_[-1] eq 'HASH';
+  my $check = $opt->{check};
   my $jobs = $self->{jobs} ||= [];
   my $data = $self->{data} ||= [];
   if (@_) {
     my $jobs = shift;
-    while (my $job = shift @$jobs) {
-      $self->add_job(ref $job eq 'CODE' ? $job : {$job => shift @$jobs});
+    my $data;
+    @$data= @{shift() || []} if defined $_[0];
+   if (ref $jobs eq 'CODE') {
+      $jobs = ref $data eq 'ARRAY' ? [($jobs) x @{$data}] : [$jobs];
+    } elsif (ref $jobs ne 'ARRAY') {
+      Carp::croak("first argument must be ARRAY reference of code reference or 1 code reference: $jobs");
     }
-    @{$data} = @{shift() || []};
+    if (defined $data) {
+      if (ref $data ne 'ARRAY') {
+        Carp::croak("data(second argument) must be ARRAY reference or don't give any data.");
+      } elsif (ref $jobs eq 'ARRAY' and @{$data} != @{$jobs}) {
+        Carp::croak("num of code and num of data must be same or  don't give any data.");
+      }
+    }
+    while (my $job = shift @$jobs) {
+      my $d = shift @$data;
+      $self->add_job(ref $job eq 'CODE' ? ($job, $d) : $job, $d);
+    }
   }
   $self->{count}++;
   $self->{current}++;
 
   my $pids = $self->{pids};
-  my ($job_name, $job) = %{$self->take_job || {}};
-  my $job_data = shift @{$data ||= []};
+  my ($job_name_job, $job_data) = $self->take_job;
+  my ($job_name, $job) = %{$job_name_job || {}};
   my $retry_fork = $self->{retry_fork};
   $self->{parent} = $self->{name};
 
@@ -134,10 +157,7 @@ sub do_fork {
         $self->do_fork(ref $check eq 'CODE' ? $check : ());
       } else {
         if (! $self->{setsid} and ! $self->{nowait}) {
-          $self->_wait_pids(0, $check);
-        }
-        if ($self->{is_child}) {
-          exit $self->result;
+          $self->wait_all_children($check);
         }
         redo JOBS if $self->has_job
       }
@@ -170,10 +190,7 @@ sub do_fork {
       } else {
         $status = $result;
       }
-      my $child_data = $self->child_data->get;
-      $child_data->{result} = $status;
-      $child_data->{pid}    = $$;
-      $self->child_data->set($child_data);
+      $self->child_data->lock_store(sub {my $data = shift; $data->{_}{result} = $status ? 1 : 0; $data->{_}{pid} = $$; $data});
     }
     exit $status;
   } else {
@@ -185,8 +202,11 @@ sub do_fork {
 }
 
 sub wait_all_children {
-  my ($self) = @_;
-  $self->_wait_pids;
+  my ($self, $check) = @_;
+  $self->_wait_pids(0, $check);
+  if ($self->{is_child}) {
+    $self->parent_data->lock_store(sub {my $d = shift; $d->{_}{result} //= 1; $d->{_}{result} &= $self->result; $d });
+  }
 }
 
 sub _wait_pids {
@@ -217,7 +237,8 @@ sub result {
   my $self = shift;
   my $r = 1;
   foreach my $data (@{$self->child_data->get_all}) {
-    ($r &= $data->{result}) or last;
+    next if not exists $data->{_}{result};
+    ($r &= $data->{_}{result}) or last;
   }
   return $r;
 }
@@ -232,6 +253,17 @@ sub parent_data {
   $self->{parent_data}
 }
 
+sub root_data {
+  my $self = shift;
+  $self->{root_data}
+}
+
+sub cleanup {
+  my $self = shift;
+  $self->root_data->cleanup;
+  $self->child_data->cleanup;
+}
+
 1;
 
 =head1 NAME
@@ -242,14 +274,12 @@ Fork::ParallelJob -- simply do jobs parallelly using fork
 
 do same job with different data parallelly.
 
-  my $fork = Fork::ParallelJob->new(max_process => 3, name => "fork1", nowait=>0);
+  my $fork = Fork::ParallelJob->new(max_process => 3, name => "fork1", nowait=>1);
   my $job = sub {
     my $f = shift; # $fork object
     my $data = shift;
   };
-  foreach my $d (@data) {
-     $fork->start_job($job, $d);
-  }
+  $fork->do_fork($job, \@data);
   # waiting all job are finished
   $fork->wait_all_children;
 
@@ -265,7 +295,7 @@ do different jobs parallelly.
               {
                 # child of child
                 my $child = $fork->child(name => "fork2", max_process => 2, retry => 4);
-                $fchild>do_fork([
+                $child>do_fork([
                                  name1 => sub { print "1-1c - $$\n";sleep 4;  print 1,"\t -- \t",time - $now,"\n" },
                                  name2 => sub { print "1-2c - $$\n";sleep 5;  print 2,"\t -- \t",time - $now,"\n" },
                                ]);
@@ -287,6 +317,10 @@ process tree is like this:
      |   \_ /usr/bin/perl ./fork.pl
      \_ /usr/bin/perl ./fork.pl
      \_ /usr/bin/perl ./fork.pl
+
+You can check process tree by the command like the following on Linux.
+
+ % watch 'ps -ef f | grep fork.pl'
 
 =head1 DESCRIPTION
 
@@ -320,7 +354,15 @@ how many times retry fork
 
 =item  data_format
 
-data format of parent_data/child_data. Storable(default), YAML, JSON.
+data format of root_data/child_data. Storable(default), YAML, JSON.
+
+=item  root_data_format
+
+data format for root data. if omitted, use data_format.
+
+=item  child_data_format
+
+data format for child data. if omitted, use data_format.
 
 =item  setsid
 
@@ -337,11 +379,23 @@ sleep seconds for waitpid(default: 0.5).
 =item nowait
 
 not wait children. If you use this option, use wait_all_children method to wait children.
+default value is 0.
 
-=item  job_in_parent
+=item  jobs_in_root
 
-jobs are saved into parent data(use Fork::ParallelJob::Jobs::ParentData instead of Fork::ParallelJob::Jobs).
-L</"about jobs_in_parent new parameter">
+jobs are saved into root data(use Fork::ParallelJob::Jobs::RootData instead of Fork::ParallelJob::Jobs).
+L</"about jobs_in_root new parameter">
+
+=item tmp_name
+
+temorary directory name prefix. default is.
+
+ '/tmp/fork-paralleljob'
+
+Actual directories are:
+
+ /tmp/fork-paralleljob-child-$name
+ /tmp/fork-paralleljob-root-$name
 
 =back
 
@@ -396,14 +450,6 @@ If it returns 0, one/some processes fail.
 
 =back
 
-=head2 start_job
-
-strt job. If you use this method, set nowait option true.
-
- $fork = Fork::ParallelJob->new;
- $fork->nowait(1);
- $fork->start_job($job, $data);
-
 =head2 child
 
  $child = $fork->child(%options);
@@ -413,8 +459,8 @@ if you pass %options, parent's values are overrided.
 
 =head2 add_job
 
- $fork->add(sub { ... });
- $fork->add(sub { ... });
+ $fork->add(sub { ... }, $data);
+ $fork->add(sub { ... }, $data);
 
 add new job.
 
@@ -430,28 +476,35 @@ get job and remove from jobs.
 
 return true if jobs is not empty.
 
-=head2 parent_data
+=head2 root_data
 
- $data = $fork->parent_data->get;
- $fork->parent_data->set($data);
+ $data = $fork->root_data->get;
+ $fork->root_data->set($data);
 
-It returns Fork::ParallelJob::Data object for parent data.
+It returns Fork::ParallelJob::Data object for root data.
 
-parent data may be accessed from many children, so you should lock it when reading/writing.
+root data may be accessed from many children, so you should lock it when reading/writing.
 
  $pd = $fork->parent_data;
- $pd->lock(
+ $pd->lock_store(
    sub {
-     my $data = $pd->get;
+     my $data = shift # return value of $pd->get;
      $data->{hoge} = 1;
-     $pd->set($data);
+     return $data;    # $pd->set($data) is called;
    }
  );
 
+=head2 parent_data
+
+This method usage is as same as root_data.
+
+ root
+  +- child (root_data is equal to parent_data)
+     +- grandchild (root_data is root's data, parent_data is child1's data)
+
 =head2  wait_all_children
 
-If you use nowait option for new, use this method and wait all children.
-
+If you use nowait option for new, use this method to wait all children.
 
 =head2 child_data
 
@@ -460,9 +513,19 @@ If you use nowait option for new, use this method and wait all children.
 
 It returns Fork::ParallelJob::Data object for child data.
 
-=head1 about jobs_in_parent new parameter
+=head2 cleanup
 
-If you set jobs_in_parent as true, you can add jobs from child process.
+ $fork->cleanup;
+
+delete root_data and child_data.
+This is shortcut:
+
+ $fork->root_data->cleanup;
+ $fork->child_data->cleanup;
+
+=head1 about jobs_in_root new parameter
+
+If you set jobs_in_root as true, you can add jobs from child process.
 
   my $fork = Fork::ParallelJob->new(max_process => 3, name => "fork1", close => 0, setsid => 0);
   # the following jobs will do with fork
@@ -470,7 +533,7 @@ If you set jobs_in_parent as true, you can add jobs from child process.
   $fork->add_job(sub { print "this is child process". my $f = shift; $f->add_job(sub { print 'inserted from child'})})
   $fork->do_fork;
 
-This mode cannot use which variables defined in out of code ref.
+This mode cannot use variables which defined in out of code ref.
 In the following case, $time used in code ref is no use.
 
   my $now = time;
@@ -494,7 +557,6 @@ automatically be notified of progress on your bug as I make changes.
 You can find documentation for this module with the perldoc command.
 
     perldoc Fork::ParallelJob
-
 
 You can also look for information at:
 

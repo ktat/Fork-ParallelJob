@@ -3,22 +3,22 @@ package Fork::ParallelJob::Data;
 use strict;
 use warnings;
 use Fcntl qw/:DEFAULT :flock/;
+use File::Path qw/make_path/;
 
 sub new {
   my $klass = shift;
   my %args = @_;
   die "mandatory parameter:base_dir is missing"
     unless $args{base_dir};
-  # build object
+
   my $self = bless {
                     worker_id => $$,
                     format    => 'Storable',
                     %args,
                    }, $klass;
-  # create base_dir if necessary
-  $self->cleanup if -e $args{base_dir};
 
-  mkdir $args{base_dir}
+  $self->cleanup if -e $args{base_dir};
+  make_path $args{base_dir}
     or die "failed to create directory:$args{base_dir}:$!";
 
   return $self;
@@ -96,9 +96,7 @@ sub get_all {
   my ($self) = @_;
   my @files = glob "$self->{base_dir}/status_*";
   my @data;
-  for my $fn (@files) {
-    push @data, $self->get($fn);
-  }
+  push @data, $self->get($_) for @files;
   return \@data;
 }
 

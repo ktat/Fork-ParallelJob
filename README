@@ -1,6 +1,6 @@
 Fork-ParallelJob
 
-Fork::ParallelJob do job(coderef) parallelly.
+simply do jobs parallelly using fork.
 
 INSTALLATION
 

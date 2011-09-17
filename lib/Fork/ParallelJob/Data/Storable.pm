@@ -25,7 +25,10 @@ sub _set {
 
   if (my $fh = $self->{fh}) {
     seek $fh, 0, 0;
-    nstore_fd($status, $fh);
+    eval {
+      nstore_fd($status, $fh);
+    };
+    Carp::cluck($@) if $@;
   } else {
     nstore($status, $filename);
   }
