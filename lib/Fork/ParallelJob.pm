@@ -9,7 +9,7 @@ use warnings;
 use Fork::ParallelJob::Jobs;
 use Class::Accessor::Lite
   (
-   rw => [qw/nowait retry max_process close wait_sleep tmp_name/],
+   rw => [qw/nowait retry max_process wait_sleep tmp_name/],
    r  => [qw/name pid count current child_data_format root_data root_data_format is_child pids/],
   );
 
@@ -21,16 +21,16 @@ sub new {
     {
      tmp_name           => '/tmp/fork-paralleljob',
      name               => '',
-     close              => 0,
+     close              => undef,
+     nowait             => undef,
+     setsid             => undef,
      max_process        => 0,
      retry              => 0,
-     setsid             => 0,
      pid                => $$,
      data_format        => 'Storable',
      root_data_format   => '',
      child_data_format  => '',
      wait_sleep         => 0.5,
-     nowait             => 0,
      jobs_in_root       => 0,
      @_,
      pid                => $$,
@@ -39,10 +39,23 @@ sub new {
      current            => 0,
     }, $class;
 
-  # wrong combination : max_process & nowait
-  # wrong combination : max_process & setsid
-
   $self->{name} ||= $$;
+
+  if (defined $ENV{SERVER_PROTOCOL} and $ENV{SERVER_PROTOCOL} =~m{^HTTP}i and not $self->{is_child}) {
+    $self->{close}  //= 1;
+    $self->{nowait} //= 1;
+    $self->{setsid} //= 1;
+  } else {
+    $self->{close}  ||= 0;
+    $self->{nowait} ||= 0;
+    $self->{setsid} ||= 0;
+  }
+
+  if ($self->{max_process}) {
+    for my $key (qw/nowait setsid/) {
+      Carp::carp("cannot use max_process with $key") if $self->{$key};
+    }
+  }
 
   for my $key ('root', 'child') {
     next if $self->{$key . '_data'};
@@ -72,6 +85,7 @@ sub child {
   my ($self) = shift;
   my %opt = @_;
   my $clone = Clone::clone {%$self};
+  undef @{$clone}{qw/setsid nowait close/};
   Carp::carp("'name' option is autmatically defined. ignored.") if exists $opt{name};
   delete $clone->{jobs};
   my $o = (ref $self)->new(%$clone, %opt, is_child => 1);
@@ -139,11 +153,6 @@ sub do_fork {
  FORK:
   if (my $pid = fork()) {
     # parent
-    if ($self->{close}) {
-      local *STDIN;
-      local *STDOUT;
-      local *STDERR;
-    }
     $SIG{CHLD} = 'IGNORE'  if $self->{setsid};
 
     push @$pids, $pid;
@@ -175,9 +184,9 @@ sub do_fork {
         setsid or die "Can't start a new session: $!";
       }
       if ($self->{close}) {
-        local *STDIN;
-        local *STDOUT;
-        local *STDERR;
+        close STDIN;
+        close STDOUT;
+        close STDERR;
       }
       my $result = eval {$job->($self, $job_data)};
       if ($@) {
@@ -203,9 +212,23 @@ sub do_fork {
 
 sub wait_all_children {
   my ($self, $check) = @_;
+  if ($self->{close}) {
+    close STDIN;
+    close STDOUT;
+    close STDERR;
+  }
   $self->_wait_pids(0, $check);
   if ($self->{is_child}) {
     $self->parent_data->lock_store(sub {my $d = shift; $d->{_}{result} //= 1; $d->{_}{result} &= $self->result; $d });
+  } else {
+    $self->{wait_all_children_done} = 1;
+  }
+}
+
+sub DESTROY {
+  my ($self) = @_;
+  if (not $self->{is_child} and not $self->{wait_all_children_done}) {
+    $self->wait_all_children;
   }
 }
 
@@ -274,7 +297,7 @@ Fork::ParallelJob -- simply do jobs parallelly using fork
 
 do same job with different data parallelly.
 
-  my $fork = Fork::ParallelJob->new(max_process => 3, name => "fork1", nowait=>1);
+  my $fork = Fork::ParallelJob->new(max_process => 3, name => "fork1");
   my $job = sub {
     my $f = shift; # $fork object
     my $data = shift;
@@ -343,6 +366,7 @@ name of jobs. if you omit it, use process id.
 =item  max_process
 
 max processes. if 0, unlimit. (default: 0).
+You cannot use this option with nowait/setsid option.
 
 =item  retry
 
@@ -366,20 +390,23 @@ data format for child data. if omitted, use data_format.
 
 =item  setsid
 
-use setsid in child process (default: 0). useful for CGI etc.
+use setsid in child process. default value is 0.
+NOTE THNT: not child and SERVER_PROTOCOL environment value is /^HTTP/, default value is 1.
 
 =item  close
 
-if true, close STDIN/STDOUT/STDERR (default: 0)
-
-=item  wait_sleep
-
-sleep seconds for waitpid(default: 0.5).
+if true, close STDIN/STDOUT/STDERR).  default value is 0.
+NOTE THNT: not child and SERVER_PROTOCOL environment value is /^HTTP/, default value is 1.
 
 =item nowait
 
 not wait children. If you use this option, use wait_all_children method to wait children.
-default value is 0.
+defualt value is 0.
+NOTE THNT: not child and SERVER_PROTOCOL environment value is /^HTTP/, default value is 1.
+
+=item  wait_sleep
+
+sleep seconds for waitpid(default: 0.5).
 
 =item  jobs_in_root
 
@@ -454,7 +481,7 @@ If it returns 0, one/some processes fail.
 
  $child = $fork->child(%options);
 
-It create child of child. parent($fork)'s options are inherited.
+It create child of child. parent($fork)'s options except nowait, setsid and close are inherited.
 if you pass %options, parent's values are overrided.
 
 =head2 add_job
