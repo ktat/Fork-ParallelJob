@@ -51,10 +51,8 @@ sub new {
     $self->{setsid} ||= 0;
   }
 
-  if ($self->{max_process}) {
-    for my $key (qw/nowait setsid/) {
-      Carp::carp("cannot use max_process with $key") if $self->{$key};
-    }
+  if ($self->{max_process} and $self->{nowait}) {
+    Carp::carp("cannot use max_process with nowait");
   }
 
   for my $key ('root', 'child') {
@@ -116,8 +114,6 @@ sub has_job {
 
 sub do_fork {
   my $self = shift;
-  my $opt = pop if ref $_[-1] eq 'HASH';
-  my $check = $opt->{check};
   my $jobs = $self->{jobs} ||= [];
   my $data = $self->{data} ||= [];
   if (@_) {
@@ -156,20 +152,13 @@ sub do_fork {
     $SIG{CHLD} = 'IGNORE'  if $self->{setsid};
 
     push @$pids, $pid;
-    if ($self->{max_process} and ! $self->{setsid}) {
-      # ignore check & max_process when setsid is true
-      $self->_wait_pids($self->{max_process});
+    if ($self->{max_process} and @$pids >= $self->{max_process}) {
+      $self->_wait_pids;
     }
-  JOBS:
-    {
-      if ($self->has_job) {
-        $self->do_fork(ref $check eq 'CODE' ? $check : ());
-      } else {
-        if (! $self->{setsid} and ! $self->{nowait}) {
-          $self->wait_all_children($check);
-        }
-        redo JOBS if $self->has_job
-      }
+    if ($self->has_job) {
+      $self->do_fork;
+    } elsif (! $self->{nowait}) {
+      $self->wait_all_children;
     }
   } elsif (defined $pid) {
     # child
@@ -201,7 +190,7 @@ sub do_fork {
       }
       $self->child_data->lock_store(sub {my $data = shift; $data->{_}{result} = $status ? 1 : 0; $data->{_}{pid} = $$; $data});
     }
-    exit $status;
+    exit($status ? 0 : 1);
   } else {
     # error
     redo FORK if $retry_fork-- > 0;
@@ -211,13 +200,13 @@ sub do_fork {
 }
 
 sub wait_all_children {
-  my ($self, $check) = @_;
+  my ($self) = @_;
   if ($self->{close}) {
     close STDIN;
     close STDOUT;
     close STDERR;
   }
-  $self->_wait_pids(0, $check);
+  $self->_wait_pids;
   if ($self->{is_child}) {
     $self->parent_data->lock_store(sub {my $d = shift; $d->{_}{result} //= 1; $d->{_}{result} &= $self->result; $d });
   } else {
@@ -235,25 +224,41 @@ sub DESTROY {
 sub _wait_pids {
   my $self = shift;
   my $limit = shift || 0;
-  my $check = shift;
   my $pids = $self->{pids};
   my %pids;
   @pids{@$pids} = ();
-  while ($limit ? keys %pids >= $limit : keys %pids) {
-    foreach my $pid (keys %pids) {
-      my $kill_pid = waitpid $pid, WNOHANG;
-      if ($kill_pid > 0 or $kill_pid == -1) {
-        $self->{current}--;
-        $self->{result}->{$kill_pid} = $? if $kill_pid > 0;
-        delete $pids{$pid};
+  while (%pids) {
+    my $kill_pid = waitpid -1, WNOHANG;
+    if ($kill_pid == 0) {
+      # process running;
+    } elsif ($kill_pid == -1) {
+      # no child processes
+      %pids = ();
+      $self->{current} = 0;
+      last;
+    } elsif ($kill_pid > 0) {
+      # pid is killed
+      $self->{current}--;
+      if ($? == -1) {
+        $self->{result}->{$kill_pid} = undef;
+      } else {
+        my $exit = $?;
+        delete $pids{$kill_pid};
+        $self->{result}->{$kill_pid} ||=
+          {
+           $exit & 127 ?
+           (
+            signal   => ($exit & 127),
+            coredump => ($exit & 128 ? 1 : 0),
+            exit     => ($exit >> 8),
+           ) : (exit => ($exit >> 8), origin => $exit)
+        };
       }
+      last unless %pids;
     }
-    if ($check) {
-      $check->($self);
-      return if $self->has_job;
-    }
-    sleep $self->{wait_sleep};
+    sleep $self->{wait_sleep} if %pids;
   }
+  @{$self->{pids}} =  (keys %pids);
 }
 
 sub result {
