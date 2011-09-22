@@ -1,5 +1,8 @@
 use Test::More;
 
+use strict;
+use warnings;
+
 use Fork::ParallelJob::Data::Storable;
 use Fork::ParallelJob::Data::JSON;
 use Fork::ParallelJob::Data::YAML;

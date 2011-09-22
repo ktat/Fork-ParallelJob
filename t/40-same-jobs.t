@@ -4,13 +4,14 @@ use strict;
 use warnings;
 use POSIX ':sys_wait_h', 'setsid';
 use Fork::ParallelJob;
+use Time::HiRes qw/sleep/;
 
 ok my $fork = Fork::ParallelJob->new(name => "fork1", nowait => 1, wait_sleep => 0.1, tmp_name => 't/tmp/data');
 
 my $job = sub {
   my $f = shift;
   my $data = shift;
-  sleep 4;
+  sleep 0.5;
   $f->child_data->set({n => $data});
 };
 

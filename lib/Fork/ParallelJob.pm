@@ -9,7 +9,7 @@ use warnings;
 use Fork::ParallelJob::Jobs;
 use Class::Accessor::Lite
   (
-   rw => [qw/nowait retry max_process wait_sleep tmp_name/],
+   rw => [qw/nowait retry max_process wait_sleep tmp_name use_data/],
    r  => [qw/name pid count current child_data_format root_data root_data_format is_child pids/],
   );
 
@@ -32,9 +32,10 @@ sub new {
      child_data_format  => '',
      wait_sleep         => 0.5,
      jobs_in_root       => 0,
+     use_data           => 1,
      @_,
      pid                => $$,
-     pids               => [],
+     pids               => {},
      count              => 0,
      current            => 0,
     }, $class;
@@ -54,15 +55,20 @@ sub new {
   if ($self->{max_process} and $self->{nowait}) {
     Carp::carp("cannot use max_process with nowait");
   }
-
-  for my $key ('root', 'child') {
-    next if $self->{$key . '_data'};
-
-    my $data_class = 'Fork::ParallelJob::Data::' . ($self->{$key . '_data_format'} || $self->{data_format});
-    load_class($data_class);
-    $self->{$key . '_data'}  ||= $data_class->new(base_dir => $self->tmp_name . "-$key-"  . $self->{'name'});
+  if ($self->{jobs_in_root} and not $self->{use_data}) {
+    Carp::carp("cannot use jobs_in_root without use_data");
   }
-  $self->{parent_data} ||= $self->root_data;
+
+  if ($self->use_data) {
+    for my $key ('root', 'child') {
+      next if $self->{$key . '_data'};
+
+      my $data_class = 'Fork::ParallelJob::Data::' . ($self->{$key . '_data_format'} || $self->{data_format});
+      load_class($data_class);
+      $self->{$key . '_data'}  ||= $data_class->new(base_dir => $self->tmp_name . "-$key-"  . $self->{'name'});
+    }
+    $self->{parent_data} ||= $self->root_data;
+  }
 
   unless ($self->{jobs}) {
     if ( $self->{jobs_in_root} ) {
@@ -72,7 +78,7 @@ sub new {
     } else {
       $self->{jobs} = Fork::ParallelJob::Jobs->new;
     }
-    if (! $self->{is_child}) {
+    if (! $self->{is_child} and $self->use_data) {
       $self->root_data->set_worker_id($self->{'name'});
     }
   }
@@ -83,12 +89,17 @@ sub child {
   my ($self) = shift;
   my %opt = @_;
   my $clone = Clone::clone {%$self};
+  if ($self->{jobs_in_root}) {
+    Carp::croak("cannot use child with using jobs_in_root.");
+  }
+  delete $clone->{jobs};
   undef @{$clone}{qw/setsid nowait close/};
   Carp::carp("'name' option is autmatically defined. ignored.") if exists $opt{name};
-  delete $clone->{jobs};
   my $o = (ref $self)->new(%$clone, %opt, is_child => 1);
-  $o->{parent_data} = $clone->{child_data};
-  $o->child_data->worker_id($$);
+  if ($self->{use_data}) {
+    $o->{parent_data} = $clone->{child_data};
+    $o->child_data->worker_id($$);
+  }
   $o->{name} = $o->{name} . '-child-' . $$;
   return $o;
 }
@@ -146,14 +157,14 @@ sub do_fork {
   my $retry_fork = $self->{retry_fork};
   $self->{parent} = $self->{name};
 
+  local $SIG{CHLD} = sub {};
+  $SIG{CHLD} = 'IGNORE'  if $self->{setsid};
  FORK:
   if (my $pid = fork()) {
     # parent
-    $SIG{CHLD} = 'IGNORE'  if $self->{setsid};
-
-    push @$pids, $pid;
-    if ($self->{max_process} and @$pids >= $self->{max_process}) {
-      $self->_wait_pids;
+    $pids->{$pid} = $job_name;
+    if ($self->{max_process} and (scalar keys %$pids) >= $self->{max_process}) {
+      $self->_wait_one_pid;
     }
     if ($self->has_job) {
       $self->do_fork;
@@ -162,9 +173,12 @@ sub do_fork {
     }
   } elsif (defined $pid) {
     # child
+    $self->{in_child} = 1;
     POSIX::setsid() if $self->{setsid};
-    $self->{unique_name} = $self->{parent} ? $self->{parent} . '-' . $self->{count} : $self->{count};
-    $self->child_data->set_worker_id($self->{unique_name});
+    $self->{unique_name} = ($self->{parent} ? $self->{parent} . '-' . $$ . '-' . ($job_name || $self->{count}) : $$ . '-' . ($job_name || $self->{count}));
+    if ($self->use_data) {
+      $self->child_data->set_worker_id($self->{unique_name});
+    }
     delete $self->{parent};
     my $retry = $self->{retry};
     my $status;
@@ -188,9 +202,17 @@ sub do_fork {
       } else {
         $status = $result;
       }
-      $self->child_data->lock_store(sub {my $data = shift; $data->{_}{result} = $status ? 1 : 0; $data->{_}{pid} = $$; $data});
+      if ($self->use_data) {
+        $self->child_data->lock_store(sub {my $data = shift;
+                                           $data->{_}{result} = $status ? 1 : 0;
+                                           $data->{_}{pid} = $$;
+                                           $data->{_}{name} = $job_name;
+                                           $data}
+                                     );
+      }
     }
-    exit($status ? 0 : 1);
+    CORE::exit(($status ? 0 : 1) & $self->result);
+    # CORE::exit($status ? 0 : 1);
   } else {
     # error
     redo FORK if $retry_fork-- > 0;
@@ -206,8 +228,11 @@ sub wait_all_children {
     close STDOUT;
     close STDERR;
   }
-  $self->_wait_pids;
-  if ($self->{is_child}) {
+  while (keys %{$self->{pids}}) {
+    my $kid = $self->_wait_one_pid(WNOHANG);
+    last if $kid == -1;
+  }
+  if ($self->{is_child} and $self->use_data) {
     $self->parent_data->lock_store(sub {my $d = shift; $d->{_}{result} //= 1; $d->{_}{result} &= $self->result; $d });
   } else {
     $self->{wait_all_children_done} = 1;
@@ -216,59 +241,68 @@ sub wait_all_children {
 
 sub DESTROY {
   my ($self) = @_;
-  if (not $self->{is_child} and not $self->{wait_all_children_done}) {
+  if (not $self->{is_child} and not $self->{in_child} and not $self->{wait_all_children_done}) {
     $self->wait_all_children;
   }
 }
 
 sub _wait_pids {
-  my $self = shift;
-  my $limit = shift || 0;
+  my ($self, $flg) = @_;
   my $pids = $self->{pids};
-  my %pids;
-  @pids{@$pids} = ();
-  while (%pids) {
-    my $kill_pid = waitpid -1, WNOHANG;
-    if ($kill_pid == 0) {
-      # process running;
-    } elsif ($kill_pid == -1) {
-      # no child processes
-      %pids = ();
-      $self->{current} = 0;
-      last;
-    } elsif ($kill_pid > 0) {
-      # pid is killed
-      $self->{current}--;
-      if ($? == -1) {
-        $self->{result}->{$kill_pid} = undef;
-      } else {
-        my $exit = $?;
-        delete $pids{$kill_pid};
-        $self->{result}->{$kill_pid} ||=
-          {
-           $exit & 127 ?
-           (
-            signal   => ($exit & 127),
-            coredump => ($exit & 128 ? 1 : 0),
-            exit     => ($exit >> 8),
-           ) : (exit => ($exit >> 8), origin => $exit)
+  my $kid;
+}
+
+sub _wait_one_pid {
+  my $self = shift;
+  my $flg = shift;
+  my $pids = $self->{pids};
+  my $kill_pid;
+  while (1) {
+    $kill_pid = waitpid -1, $flg ||= 0;
+    redo if ! exists $pids->{$kill_pid};
+    # process running or no child processes
+    last if $kill_pid == 0 || $kill_pid == -1;
+
+    # pid is killed
+    my $job_name = delete $pids->{$kill_pid};
+    $self->{current}--;
+    if ($? == -1) {
+      $self->{result}->{$kill_pid} = undef;
+    } else {
+      my $exit = $?;
+      $self->{result}->{$kill_pid} ||=
+        {
+         name     => $job_name,
+         $exit & 127 ?
+         (
+          signal   => ($exit & 127),
+          coredump => ($exit & 128 ? 1 : 0),
+          exit     => ($exit >> 8),
+         ) : (exit => ($exit >> 8), origin => $exit)
         };
-      }
-      last unless %pids;
     }
-    sleep $self->{wait_sleep} if %pids;
+    last;
   }
-  @{$self->{pids}} =  (keys %pids);
+  sleep $self->{wait_sleep} if %$pids;
+  return $kill_pid;
 }
 
 sub result {
   my $self = shift;
-  my $r = 1;
-  foreach my $data (@{$self->child_data->get_all}) {
-    next if not exists $data->{_}{result};
-    ($r &= $data->{_}{result}) or last;
+  if ($self->use_data) {
+    my $r = 1;
+    foreach my $data (@{$self->child_data->get_all}) {
+      next if not exists $data->{_}{result};
+      ($r &= $data->{_}{result}) or last;
+    }
+    return $r;
+  } else {
+    my $result = 0;
+    foreach my $pid (keys %{$self->{result}}) {
+      $result |= $self->{result}->{$pid}->{exit};
+    }
+    return $result ? 0 : 1;
   }
-  return $r;
 }
 
 sub child_data {
@@ -288,8 +322,10 @@ sub root_data {
 
 sub cleanup {
   my $self = shift;
-  $self->root_data->cleanup;
-  $self->child_data->cleanup;
+  if ($self->use_data) {
+    $self->root_data->cleanup;
+    $self->child_data->cleanup;
+  }
 }
 
 1;
@@ -418,6 +454,8 @@ sleep seconds for waitpid(default: 0.5).
 jobs are saved into root data(use Fork::ParallelJob::Jobs::RootData instead of Fork::ParallelJob::Jobs).
 L</"about jobs_in_root new parameter">
 
+You cannot set use_data 0 when jobs_in_root is true.
+
 =item tmp_name
 
 temorary directory name prefix. default is.
@@ -473,14 +511,22 @@ each data is give to each job.
 $code is executed while waiting for finishing pids.
 $fork object is given to $code.
 
-=item result
+=back
+
+=head2 result
 
  $fork->result;
 
-If it returns 1, all processes are success.
-If it returns 0, one/some processes fail.
+If it returns 1, all processes are success. If it returns 0, one/some processes fail.
 
-=back
+If use_data is true, it judges whether success or not from data).
+If use_data is false, it judges whether success or not from exit code (0 is success).
+
+=head2 use_data
+
+ $fork->use_data
+
+If use child/parent data, it returns 1. default is 1.
 
 =head2 child
 
@@ -489,12 +535,17 @@ If it returns 0, one/some processes fail.
 It create child of child. parent($fork)'s options except nowait, setsid and close are inherited.
 if you pass %options, parent's values are overrided.
 
+You cannot call this method when jobs_in_root is true.
+
 =head2 add_job
 
  $fork->add(sub { ... }, $data);
  $fork->add(sub { ... }, $data);
 
 add new job.
+
+You can call this method from child process.
+But, you cannot call this from $fork->child's object.
 
 =head2 take_job
 
@@ -532,11 +583,12 @@ This method usage is as same as root_data.
 
  root
   +- child (root_data is equal to parent_data)
-     +- grandchild (root_data is root's data, parent_data is child1's data)
+     +- grandchild (root_data is root's data, parent_data is child's data)
 
 =head2  wait_all_children
 
 If you use nowait option for new, use this method to wait all children.
+If you don't call this, automatically called in do_fork.
 
 =head2 child_data
 
@@ -565,6 +617,8 @@ If you set jobs_in_root as true, you can add jobs from child process.
   $fork->add_job(sub { print "this is child process". my $f = shift; $f->add_job(sub { print 'inserted from child'})})
   $fork->do_fork;
 
+If you want to control total max processes and you want to add jobs from child process, this option is useful.
+
 This mode cannot use variables which defined in out of code ref.
 In the following case, $time used in code ref is no use.
 
@@ -573,6 +627,13 @@ In the following case, $time used in code ref is no use.
   # the following jobs will do with fork
   $fork->add_job(sub { print $time. my $f = shift; $f->add_job(sub { print 'inserted from child'})})
   $fork->do_fork;
+
+=head1 useing in CGI etc.
+
+If you use this module for serverside program. the following options are set.
+
+ setsid ... 1
+ close  ... 1
 
 =head1 AUTHOR
 

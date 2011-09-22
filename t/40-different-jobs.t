@@ -4,14 +4,15 @@ use strict;
 use warnings;
 use POSIX ':sys_wait_h', 'setsid';
 use Fork::ParallelJob;
+use Time::HiRes qw/sleep/;
 
 ok my $fork = Fork::ParallelJob->new(name => "fork1", nowait => 1, wait_sleep => 0.1, data_format => 'YAML', tmp_name => 't/tmp/data');
 
 my @jobs = (
-	    sub { sleep 1; my $f = shift; my $data = shift; $f->child_data->set({n => $data})    ; sleep 2},
-	    sub { sleep 1; my $f = shift; my $data = shift; $f->child_data->set({n => $data * 2}); sleep 2},
-	    sub { sleep 1; my $f = shift; my $data = shift; $f->child_data->set({n => $data * 3}); sleep 2},
-	    sub { sleep 1; my $f = shift; my $data = shift; $f->child_data->set({n => $data * 4}); sleep 2},
+	    sub { sleep 0.5; my $f = shift; my $data = shift; $f->child_data->set({n => $data})    ; },
+	    sub { sleep 0.5; my $f = shift; my $data = shift; $f->child_data->set({n => $data * 2}); },
+	    sub { sleep 0.5; my $f = shift; my $data = shift; $f->child_data->set({n => $data * 3}); },
+	    sub { sleep 0.5; my $f = shift; my $data = shift; $f->child_data->set({n => $data * 4}); },
 	   );
 
 my @data = (1 .. 4);

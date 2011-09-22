@@ -4,6 +4,7 @@ use strict;
 use warnings;
 use POSIX ':sys_wait_h', 'setsid';
 use Fork::ParallelJob;
+use Time::HiRes qw/sleep/;
 
 my %max;
 
@@ -14,10 +15,10 @@ for my $max (1, 3) {
   my $job = sub {
     my $f = shift;
     my $data = shift;
-    sleep 1;
     $|=1;
+    sleep 0.5;
     chomp (my $pid_num = qx/ps -ef |grep -E '^$ENV{USER} +[0-9]+ +$pid ' | wc -l/);
-    sleep 1;
+    sleep 0.5;
     $f->child_data->set({n => $data, pid_num => $pid_num});
   };
 
@@ -31,8 +32,11 @@ for my $max (1, 3) {
     $max{$data->{pid_num}}++;
   }
   is $r, $sum, "sum is $sum";
-  sleep 2;
   $fork->cleanup;
+
+  # use Data::Dumper;
+  # warn Data::Dumper::Dumper($fork->{result})
+
 }
 is_deeply \%max, {
                   1 => 3,

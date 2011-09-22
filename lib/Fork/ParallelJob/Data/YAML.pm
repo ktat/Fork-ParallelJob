@@ -16,7 +16,7 @@ sub _get {
     return -e $filename ? LoadFile($filename) : {};
   }
 }
-use Data::Dumper;
+
 sub _set {
   my ($self, $filename, $status) = @_;
   if (my $fh = $self->{fh}) {

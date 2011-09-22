@@ -4,28 +4,28 @@ use strict;
 use warnings;
 use POSIX ':sys_wait_h', 'setsid';
 use Fork::ParallelJob;
+use Time::HiRes qw/sleep/;
 
 my $fork = Fork::ParallelJob->new(max_process => 3, name =>1, data_format => 'YAML', wait_sleep => 0.1, tmp_name => 't/tmp/data');
 my $pid = $$;
 my $code = sub {
   my $fork = shift;
-  sleep 1;
+  sleep 0.5;
   chomp(my $pid_num = qx/ps -ef |grep -E '^$ENV{USER} +[0-9]+ +$pid ' | grep -v 'grep' | wc -l/);
   $fork->child_data->lock_store(sub {my $data = shift; $data->{pid_num} = $pid_num; $data});
   my $child_pid = $$;
   my $child = $fork->child(max_process => 2, data_format => 'YAML');
   my $code = sub {
     my $fork = shift;
-    sleep 1;
+    sleep 0.5;
     chomp(my $pid_num = qx/ps -ef |grep -E '^$ENV{USER} +[0-9]+ +$child_pid ' | grep -v grep| wc -l/);
     $fork->child_data->lock_store(sub { my $data = shift; $data->{pid_num} = $pid_num; $data});
-    sleep 1;
   };
   $child->do_fork
     ([
       (sub {
          my $fork = shift;
-         sleep 1;
+         sleep 0.5;
          chomp(my $pid_num = qx/ps -ef |grep -E '^$ENV{USER} +[0-9]+ +$child_pid ' | grep -v grep| wc -l/);
          $fork->child_data->lock_store(sub{my $data = shift; $data->{pid_num} = $pid_num; $data});
          my $child = $fork->child(max_process => 1);
@@ -34,16 +34,13 @@ my $code = sub {
            (
             [sub {
                my $fork = shift;
-               sleep 1;
+               sleep 0.5;
                chomp(my $pid_num = qx/ps -ef |grep -E '^$ENV{USER} +[0-9]+ +$child_child_pid ' | grep -v grep| wc -l/);
                $fork->child_data->lock_store(sub{my $data = shift; $data->{pid_num} = $pid_num; $data});
-               sleep 2;
              }
             ]);
-         sleep 2;
        }) x 4,
      ]);
-  sleep 5;
 };
 
 $fork->do_fork([($code) x 6]);

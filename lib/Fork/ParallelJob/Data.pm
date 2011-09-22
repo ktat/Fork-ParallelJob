@@ -5,6 +5,8 @@ use warnings;
 use Fcntl qw/:DEFAULT :flock/;
 use File::Path qw/make_path/;
 
+my $first_cleanup = 0;
+
 sub new {
   my $klass = shift;
   my %args = @_;
@@ -17,9 +19,13 @@ sub new {
                     %args,
                    }, $klass;
 
-  $self->cleanup if -e $args{base_dir};
-  make_path $args{base_dir}
-    or die "failed to create directory:$args{base_dir}:$!";
+  unless ($first_cleanup) {
+    $self->cleanup if -e $args{base_dir};
+  }
+  unless (-e $args{base_dir}) {
+    make_path $args{base_dir}
+      or die "failed to create directory:$args{base_dir}:$!";
+  }
 
   return $self;
 }
