@@ -27,12 +27,20 @@ $jobs->add({'name2' => sub {return 2}}, 2);
 is $jobs->num_of_jobs, 2;
 $jobs->add_multi([{'name3' => sub {return 3}}, {'name4' => sub {return 4}}], [3, 4]);
 is $jobs->num_of_jobs, 4;
+$jobs->add('name1', 5);
+$jobs->add('name2', 6);
 
 for my $n (1, 2, 3, 4) {
   my ($job, $data) = $jobs->take;
   is $data, $n;
   is $job->{'name' . $n}->(), $n;
-  is $jobs->num_of_jobs, 4 - $n;
+  is $jobs->num_of_jobs, 6 - $n;
+}
+for my $n (1, 2) {
+  my ($job, $data) = $jobs->take;
+  is $data, $n + 4;
+  is $job->{'name' . $n}->(), $n;
+  is $jobs->num_of_jobs, 2 - $n;
 }
 
 done_testing;

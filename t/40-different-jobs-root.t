@@ -11,18 +11,30 @@ my $pid = $$;
 
 my $code = sub {
   my $f = shift;
-  $f->add_job([{a => sub {
-                  # warn "from child $$";
-                  my $f2 = shift;
-                  $f2->child_data->lock_store(sub {my $d = shift; $d->{add_from_child1} = 1; $d});
-                  return 1;
-                }},
-               {b => sub {
-                  my $f3 = shift;
-                  # warn "from child of child $$";
-                  $f3->child_data->lock_store(sub {my $d = shift; $d->{add_from_child2} = 1; $d});
-                  return 1;
-                }}]);
+  my $child = $f->child;
+  $child->add_root_job(sub {
+                         my $f2 = shift;
+                         $f2->child_data->lock_store(sub {my $d = shift; $d->{add_from_child1_to_root} = 1; $d});
+                         return 1;
+                       });
+  $child->add_job([{a => sub {
+                      # warn "from child $$";
+                      my $f2 = shift;
+                      $f2->add_root_job(sub {
+                                          my $f2 = shift;
+                                          $f2->child_data->lock_store(sub {my $d = shift; $d->{add_from_child2_to_root} = 1; $d});
+                                          return 1;
+                                        });
+                      $f2->child_data->lock_store(sub {my $d = shift; $d->{add_from_child1} = 1; $d});
+                      return 1;
+                    }},
+                   {b => sub {
+                      my $f3 = shift;
+                      # warn "from child of child $$";
+                      $f3->child_data->lock_store(sub {my $d = shift; $d->{add_from_child2} = 1; $d});
+                      return 1;
+                    }}]);
+  $child->do_fork;
   return 1;
 };
 $fork->do_fork([($code) x 3]);
@@ -36,13 +48,15 @@ foreach my $d (@{$fork->child_data->get_all}) {
   $n++;
   $cnt{1} += $d->{add_from_child1} if $d->{add_from_child1};
   $cnt{2} += $d->{add_from_child2} if $d->{add_from_child2};
+  $cnt{3} += $d->{add_from_child1_to_root} if $d->{add_from_child1_to_root};
+  $cnt{4} += $d->{add_from_child2_to_root} if $d->{add_from_child2_to_root};
 }
 
-is $n, 3 + 6, 'num of files = 3(parent) + 3 * 2(added jobs from child)';
+is $n, 15, 'num of files = 3(from parent) + 3(yield from parent) * 6(parent(3) * child(2)) + 3(yield from child)';
 is $cnt{1}, 3;
 is $cnt{2}, 3;
+is $cnt{3}, 3;
+is $cnt{4}, 3;
 
 $fork->cleanup;
 done_testing;
-
-__END__

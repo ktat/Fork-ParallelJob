@@ -2,16 +2,33 @@ package Fork::ParallelJob::Jobs;
 
 use strict;
 use warnings;
+use Carp;
 
 sub new {
   my $class = shift;
-  bless { jobs => [], data => []}, $class;
+  bless { jobs => [], data => [], jobs_hash => {}}, $class;
 }
 
 sub add {
   my ($self, $job, $data) = @_;
-  push @{$self->{jobs}}, {(ref $job eq 'CODE' ? ($self->num_of_jobs + 1, $job) : %$job)};
-  push @{$self->{data}}, $data;
+  my $num_of_jobs = $self->num_of_jobs;
+  $self->_add(\$num_of_jobs, $self->{jobs}, $self->{data}, $self->{jobs_hash}, $job, $data);
+}
+
+sub _add {
+  my ($self, $num_of_jobs, $jobs, $job_data, $jobs_hash, $job, $data) = @_;
+  if (ref $job eq 'CODE') {
+    push @$jobs, {$$num_of_jobs += 1, $job};
+  } elsif (ref $job eq 'HASH') {
+    my ($name, $code) = %$job;
+    $jobs_hash->{$name} = $code;
+    push @$jobs, {$name, $code};
+  } else {
+    # $job is job_name
+    Carp::croak("job name($job) doesn't exist")  unless $jobs_hash->{$job};
+    push @$jobs, {$job, $jobs_hash->{$job}};
+  }
+  push @$job_data, $data;
 }
 
 sub add_multi {
@@ -21,7 +38,12 @@ sub add_multi {
 
 sub take {
   my ($self) = @_;
-  (shift @{$self->{jobs}}, shift @{$self->{data}});
+  return(shift @{$self->{jobs}}, shift @{$self->{data}});
+}
+
+sub _take {
+  my ($self, $jobs, $job_data) = @_;
+  return(shift @$jobs, shift @$job_data);
 }
 
 sub num_of_jobs {

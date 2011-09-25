@@ -71,10 +71,11 @@ sub new {
   }
 
   unless ($self->{jobs}) {
-    if ( $self->{jobs_in_root} ) {
+    if (! $self->{is_child} and $self->{jobs_in_root} ) {
       Carp::croak(ref($self->{'root_data'}) . " cannot store job.") unless $self->{'root_data'}->can_job_store;
       load_class('Fork::ParallelJob::Jobs::RootData');
       $self->{jobs} = Fork::ParallelJob::Jobs::RootData->new($self->{'root_data'});
+      $self->{root_jobs} ||= $self->{jobs};
     } else {
       $self->{jobs} = Fork::ParallelJob::Jobs->new;
     }
@@ -90,10 +91,12 @@ sub child {
   my %opt = @_;
   my $clone = Clone::clone {%$self};
   if ($self->{jobs_in_root}) {
-    Carp::croak("cannot use child with using jobs_in_root.");
+    $clone->{root_jobs} ||= $clone->{jobs};
   }
-  delete $clone->{jobs};
-  undef @{$clone}{qw/setsid nowait close/};
+
+  # not inherit these data
+  undef $clone->{$_} for qw/jobs setsid nowait close/;
+
   Carp::carp("'name' option is autmatically defined. ignored.") if exists $opt{name};
   my $o = (ref $self)->new(%$clone, %opt, is_child => 1);
   if ($self->{use_data}) {
@@ -102,6 +105,15 @@ sub child {
   }
   $o->{name} = $o->{name} . '-child-' . $$;
   return $o;
+}
+
+sub add_root_job {
+  my ($self, $jobs, $data) = @_;
+  if (ref $jobs eq 'ARRAY') {
+    $self->{root_jobs}->add_multi($jobs, $data);
+  } else {
+    $self->{root_jobs}->add($jobs, $data);
+  }
 }
 
 sub add_job {
@@ -164,6 +176,7 @@ sub do_fork {
     # parent
     $pids->{$pid} = $job_name;
     if ($self->{max_process} and (scalar keys %$pids) >= $self->{max_process}) {
+      # use blocking wait to wait finishing any one process.
       $self->_wait_one_pid;
     }
     if ($self->has_job) {
@@ -289,20 +302,26 @@ sub _wait_one_pid {
 
 sub result {
   my $self = shift;
-  if ($self->use_data) {
-    my $r = 1;
-    foreach my $data (@{$self->child_data->get_all}) {
-      next if not exists $data->{_}{result};
-      ($r &= $data->{_}{result}) or last;
-    }
-    return $r;
-  } else {
-    my $result = 0;
-    foreach my $pid (keys %{$self->{result}}) {
-      $result |= $self->{result}->{$pid}->{exit};
-    }
-    return $result ? 0 : 1;
+  $self->use_data ? $self->result_from_data : $self->result_from_exit;
+}
+
+sub result_from_exit {
+  my $self = shift;
+  my $result = 0;
+  foreach my $pid (keys %{$self->{result}}) {
+    $result |= $self->{result}->{$pid}->{exit};
   }
+  return $result ? 0 : 1;
+}
+
+sub result_from_data {
+  my ($self) = @_;
+  my $result = 1;
+  foreach my $data (@{$self->child_data->get_all}) {
+    next if not exists $data->{_}{result};
+    ($result &= $data->{_}{result}) or last;
+  }
+  return $result;
 }
 
 sub child_data {
@@ -519,8 +538,20 @@ $fork object is given to $code.
 
 If it returns 1, all processes are success. If it returns 0, one/some processes fail.
 
-If use_data is true, it judges whether success or not from data).
-If use_data is false, it judges whether success or not from exit code (0 is success).
+If use_data is true, it uses $fork->result_from_data.
+If use_data is false, it uses $fork->result_from_exit.
+
+=head2 result_from_exit
+
+ $fork->result_from_exit;
+
+return result from exit code(success is 0).
+
+=head2 result_from_data
+
+ $fork->result_from_data;
+
+return result from data (if code returns 1, success)
 
 =head2 use_data
 
@@ -539,13 +570,26 @@ You cannot call this method when jobs_in_root is true.
 
 =head2 add_job
 
- $fork->add(sub { ... }, $data);
- $fork->add(sub { ... }, $data);
+ $fork->add_job(sub { ... }, $data);
+ $fork->add_job([sub { ... }, ...], [$data, ...]);
+ $fork->add_job({job_name => sub { ... }}, $data);
+ $fork->add_job([{job_name => sub { ... }}, ...], [$data, ...]);
+ $fork->add_job($job_name, $data);
+ $fork->add_job([$job_name, ...], [$data, ..]);
 
 add new job.
 
-You can call this method from child process.
-But, you cannot call this from $fork->child's object.
+=head2 add_root_job
+
+ $fork->add_root_job(sub { ... }, $data);
+ $fork->add_root_job([sub { ... }, ...], [$data, ...]);
+ $fork->add_root_job({job_name => sub { ... }}, $data);
+ $fork->add_root_job([{job_name => sub { ... }}, ...], [$data, ...]);
+ $fork->add_root_job($job_name, $data);
+ $fork->add_root_job([$job_name, ...], [$data, ..]);
+
+add new job to root process.
+To use this emthod, jobs_in_root must be true.
 
 =head2 take_job
 

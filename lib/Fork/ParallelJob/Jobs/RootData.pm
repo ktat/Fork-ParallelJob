@@ -7,7 +7,17 @@ use warnings;
 sub new {
   my $class = shift;
   my $pd = shift;
-  bless {pd => $pd}, $class;
+  my $self = bless {pd => $pd}, $class;
+  $pd->lock_store(
+                  sub {
+                    my $d = shift;
+                    $d->{_}{jobs}      = [];
+                    $d->{_}{jobs_data} = [];
+                    $d->{_}{jobs_hash} = {};
+                    $d;
+                  }
+                 );
+  return $self;
 }
 
 sub pd {
@@ -18,13 +28,20 @@ sub pd {
 sub add {
   my ($self, $job, $job_data) = @_;
   my $pd = $self->pd;
+  my $num_of_jobs = $self->num_of_jobs;
   $pd->lock_store
     (
      sub {my $d = shift;
-          push @{$d->{_}{jobs} ||= []}, {(ref $job eq 'CODE' ? ($self->num_of_jobs + 1, $job) : %$job)};
-          push @{$d->{_}{job_data} ||= []}, $job_data;
+          $self->_add(\$num_of_jobs,
+                      $d->{_}->{jobs} ||= [],
+                      $d->{_}->{job_data} ||= [],
+                      $d->{_}->{jobs_hash} ||= {},
+                      $job,
+                      $job_data
+                     );
           $d;
-        });
+        }
+    );
 }
 
 sub add_multi {
@@ -37,10 +54,11 @@ sub add_multi {
      sub {
        my $d = shift;
        foreach my $i (0 .. $#{$jobs}) {
-         my $job  = $jobs->[$i];
-         my $data = $job_data->[$i];
-         push @{$d->{_}{jobs} ||= []}, {(ref $job eq 'CODE' ? (++$num_of_jobs, $job) : %$job)};
-         push @{$d->{_}{job_data} ||= []}, $data;
+         $self->_add(\$num_of_jobs,
+                     $d->{_}->{jobs} ||= [],
+                     $d->{_}->{job_data} ||= [],
+                     $d->{_}->{jobs_hash} ||= {},
+                     $jobs->[$i], $job_data->[$i]);
        }
        $d;
      });
@@ -53,7 +71,7 @@ sub take {
     (
      sub {
        my $d = shift;
-       $job      = shift @{$d->{_}{jobs} ||= []};
+       $job      = shift @{$d->{_}{jobs}     ||= []};
        $job_data = shift @{$d->{_}{job_data} ||= []};
        $d
      }
