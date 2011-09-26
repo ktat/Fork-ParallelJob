@@ -19,7 +19,7 @@ for my $max (1, 3) {
     sleep 0.5;
     chomp (my $pid_num = qx/ps -ef |grep -E '^$ENV{USER} +[0-9]+ +$pid ' | wc -l/);
     sleep 0.5;
-    $f->child_data->set({n => $data, pid_num => $pid_num});
+    $f->current_data->set({n => $data, pid_num => $pid_num});
   };
 
   my ($sum, @data) = (0 .. 3 * $max);

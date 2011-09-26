@@ -3,11 +3,11 @@ use Test::More;
 use strict;
 use warnings;
 
-use Fork::ParallelJob::Jobs::RootData;
+use Fork::ParallelJob::Jobs::InData;
 use Fork::ParallelJob::Data::Storable;
 
 ok my $data = Fork::ParallelJob::Data::Storable->new(format => 'Storable', base_dir => 't/tmp');
-ok my $jobs = Fork::ParallelJob::Jobs::RootData->new($data);
+ok my $jobs = Fork::ParallelJob::Jobs::InData->new($data);
 
 is $jobs->num_of_jobs, 0;
 $jobs->add(sub { return 1 });

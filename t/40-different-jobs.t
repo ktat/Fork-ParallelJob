@@ -9,10 +9,10 @@ use Time::HiRes qw/sleep/;
 ok my $fork = Fork::ParallelJob->new(name => "fork1", nowait => 1, wait_sleep => 0.1, data_format => 'YAML', tmp_name => 't/tmp/data');
 
 my @jobs = (
-	    sub { sleep 0.5; my $f = shift; my $data = shift; $f->child_data->set({n => $data})    ; },
-	    sub { sleep 0.5; my $f = shift; my $data = shift; $f->child_data->set({n => $data * 2}); },
-	    sub { sleep 0.5; my $f = shift; my $data = shift; $f->child_data->set({n => $data * 3}); },
-	    sub { sleep 0.5; my $f = shift; my $data = shift; $f->child_data->set({n => $data * 4}); },
+	    sub { sleep 0.5; my $f = shift; my $data = shift; $f->current_data->set({n => $data})    ; },
+	    sub { sleep 0.5; my $f = shift; my $data = shift; $f->current_data->set({n => $data * 2}); },
+	    sub { sleep 0.5; my $f = shift; my $data = shift; $f->current_data->set({n => $data * 3}); },
+	    sub { sleep 0.5; my $f = shift; my $data = shift; $f->current_data->set({n => $data * 4}); },
 	   );
 
 my @data = (1 .. 4);

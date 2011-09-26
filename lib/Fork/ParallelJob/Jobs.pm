@@ -41,14 +41,18 @@ sub take {
   return(shift @{$self->{jobs}}, shift @{$self->{data}});
 }
 
-sub _take {
-  my ($self, $jobs, $job_data) = @_;
-  return(shift @$jobs, shift @$job_data);
-}
-
 sub num_of_jobs {
   my ($self) = @_;
   scalar @{$self->{jobs}};
+}
+
+sub jobs_hash {
+  my $self = shift;
+  if (@_) {
+    my $jobs = ref $_[0] eq 'HASH' ? $_[0] : { @_ };
+    @{$self->{jobs_hash}}{keys %$jobs} = values %$jobs;
+  }
+  return $self->{jobs_hash};
 }
 
 =head1 NAME

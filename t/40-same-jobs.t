@@ -12,7 +12,7 @@ my $job = sub {
   my $f = shift;
   my $data = shift;
   sleep 0.5;
-  $f->child_data->set({n => $data});
+  $f->current_data->set({n => $data});
 };
 
 my @data = (1 .. 3);

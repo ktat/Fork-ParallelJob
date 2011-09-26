@@ -19,8 +19,9 @@ requires
     'Storable'              => 0,
     'Time::HiRes'           => 0,
     'YAML::XS'              => 0,
-    'parent'                => 0;
-
+    'parent'                => 0,
+    'File::Spec'            => 0,
+    ;
 auto_install;
 
 WriteAll;

@@ -6,32 +6,32 @@ use POSIX ':sys_wait_h', 'setsid';
 use Fork::ParallelJob;
 use Time::HiRes qw/sleep/;
 
-my $fork = Fork::ParallelJob->new(max_process => 3, name =>1, data_format => 'JSON', root_data_format => 'Storable', wait_sleep => 0.1, jobs_in_root => 1, tmp_name => 't/tmp/data');
+my $fork = Fork::ParallelJob->new(max_process => 3, name =>1, data_format => 'JSON', root_data_format => 'Storable', wait_sleep => 0.1, root_jobs_in_data => 1, tmp_name => 't/tmp/data');
 my $pid = $$;
 
 my $code = sub {
   my $f = shift;
   my $child = $f->child;
-  $child->add_root_job(sub {
+  $child->add_root_job({y => sub {
                          my $f2 = shift;
-                         $f2->child_data->lock_store(sub {my $d = shift; $d->{add_from_child1_to_root} = 1; $d});
+                         $f2->current_data->lock_store(sub {my $d = shift; $d->{add_from_child1_to_root} = 1; $d});
                          return 1;
-                       });
+                       }});
   $child->add_job([{a => sub {
                       # warn "from child $$";
                       my $f2 = shift;
-                      $f2->add_root_job(sub {
+                      $f2->add_root_job({x => sub {
                                           my $f2 = shift;
-                                          $f2->child_data->lock_store(sub {my $d = shift; $d->{add_from_child2_to_root} = 1; $d});
+                                          $f2->current_data->lock_store(sub {my $d = shift; $d->{add_from_child2_to_root} = 1; $d});
                                           return 1;
-                                        });
-                      $f2->child_data->lock_store(sub {my $d = shift; $d->{add_from_child1} = 1; $d});
+                                        }});
+                      $f2->current_data->lock_store(sub {my $d = shift; $d->{add_from_child1} = 1; $d});
                       return 1;
                     }},
                    {b => sub {
                       my $f3 = shift;
                       # warn "from child of child $$";
-                      $f3->child_data->lock_store(sub {my $d = shift; $d->{add_from_child2} = 1; $d});
+                      $f3->current_data->lock_store(sub {my $d = shift; $d->{add_from_child2} = 1; $d});
                       return 1;
                     }}]);
   $child->do_fork;

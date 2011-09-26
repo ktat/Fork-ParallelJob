@@ -12,14 +12,14 @@ my $code = sub {
   my $fork = shift;
   sleep 0.5;
   chomp(my $pid_num = qx/ps -ef |grep -E '^$ENV{USER} +[0-9]+ +$pid ' | grep -v 'grep' | wc -l/);
-  $fork->child_data->lock_store(sub {my $data = shift; $data->{pid_num} = $pid_num; $data});
+  $fork->current_data->lock_store(sub {my $data = shift; $data->{pid_num} = $pid_num; $data});
   my $child_pid = $$;
   my $child = $fork->child(max_process => 2, data_format => 'YAML');
   my $code = sub {
     my $fork = shift;
     sleep 0.5;
     chomp(my $pid_num = qx/ps -ef |grep -E '^$ENV{USER} +[0-9]+ +$child_pid ' | grep -v grep| wc -l/);
-    $fork->child_data->lock_store(sub { my $data = shift; $data->{pid_num} = $pid_num; $data});
+    $fork->current_data->lock_store(sub { my $data = shift; $data->{pid_num} = $pid_num; $data});
   };
   $child->do_fork
     ([
@@ -27,7 +27,7 @@ my $code = sub {
          my $fork = shift;
          sleep 0.5;
          chomp(my $pid_num = qx/ps -ef |grep -E '^$ENV{USER} +[0-9]+ +$child_pid ' | grep -v grep| wc -l/);
-         $fork->child_data->lock_store(sub{my $data = shift; $data->{pid_num} = $pid_num; $data});
+         $fork->current_data->lock_store(sub{my $data = shift; $data->{pid_num} = $pid_num; $data});
          my $child = $fork->child(max_process => 1);
          my $child_child_pid = $$;
          $child->do_fork
@@ -36,7 +36,7 @@ my $code = sub {
                my $fork = shift;
                sleep 0.5;
                chomp(my $pid_num = qx/ps -ef |grep -E '^$ENV{USER} +[0-9]+ +$child_child_pid ' | grep -v grep| wc -l/);
-               $fork->child_data->lock_store(sub{my $data = shift; $data->{pid_num} = $pid_num; $data});
+               $fork->current_data->lock_store(sub{my $data = shift; $data->{pid_num} = $pid_num; $data});
              }
             ]);
        }) x 4,
