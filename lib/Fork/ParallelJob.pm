@@ -200,6 +200,7 @@ sub do_fork {
       $self->do_fork;
     } elsif (! $self->{nowait}) {
       $self->wait_all_children;
+      return $self->result;
     }
   } elsif (defined $pid) {
     # child
@@ -344,7 +345,7 @@ sub result_from_data {
 
 sub _add_ancestry {
   my ($self) = @_;
-  push @{$self->{ancestry}}, {jobs => Clone::clone($self->{jobs}), data => Clone::clone($self->{current_data})};
+  push @{$self->{ancestry}}, {jobs => $self->{jobs}, data => $self->{current_data}};
 }
 
 sub parent_jobs {
@@ -592,6 +593,7 @@ Actual directories are:
  $fork->do_fork(\@jobs, \@data, $code);
 
 fork given jobs.
+It retuns result of C<< $fork->result >> if nowait options is false(default).
 
 =over 4
 
@@ -616,9 +618,13 @@ or
    name4 => sub {...},
  ]
 
-If you use the later, the name is used in warning message(when job is died or return false).
+If you use the latter, the name is used in warning message(when job is died or return false).
 each job should return 1(succes)/0(fail).
 $fork object is given to each code ref.
+
+or you can use name if you pre-register job using C<register_jobs>.
+
+ [ 'name1', 'name2', 'name3', 'name4']
 
 =item @data
 
