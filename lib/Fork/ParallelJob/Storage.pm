@@ -2,6 +2,7 @@ package Fork::ParallelJob::Storage;
 
 use strict;
 use warnings;
+use Clone;
 
 sub new {
   my $self = shift;
@@ -12,6 +13,11 @@ sub name {
   my $self = shift;
   $self->{name} = shift if @_;
   $self->{name};
+}
+
+sub clone {
+  my $self = shift;
+  Clone::clone($self);
 }
 
 sub prepare {}

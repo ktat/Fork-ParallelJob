@@ -21,6 +21,7 @@ requires
     'YAML::XS'              => 0,
     'parent'                => 0,
     'File::Spec'            => 0,
+    'DBI'                   => 0,
     ;
 auto_install;
 
