@@ -1,37 +1,22 @@
 package Fork::ParallelJob::Data::Storable;
 
 use parent qw/Fork::ParallelJob::Data/;
-use Storable qw/nstore retrieve nstore_fd fd_retrieve thaw freeze/;
+use Storable qw/nstore retrieve nstore_fd fd_retrieve thaw nfreeze/;
 use strict;
 use warnings;
 
-sub _get {
-  my ($self, $filename) = @_;
+sub _deserialize {
+  my ($self, $data) = @_;
   local $Storable::Deparse = 1;
   local $Storable::Eval = 1;
-
-  if (my $fh = $self->{fh}) {
-    seek $fh, 0, 0;
-    return -s $filename ? fd_retrieve($fh) : {};
-  } else {
-    return -s $filename ? retrieve $filename : {};
-  }
+  $data ? thaw($data) : {};
 }
 
-sub _set {
-  my ($self, $filename, $status) = @_;
+sub _serialize {
+  my ($self, $status) = @_;
   local $Storable::Deparse = 1;
   local $Storable::Eval = 1;
-
-  if (my $fh = $self->{fh}) {
-    seek $fh, 0, 0;
-    eval {
-      nstore_fd($status, $fh);
-    };
-    Carp::cluck($@) if $@;
-  } else {
-    nstore($status, $filename);
-  }
+  nfreeze($status);
 }
 
 sub can_job_store { 1 }

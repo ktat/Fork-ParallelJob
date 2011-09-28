@@ -76,7 +76,14 @@ sub new {
 
       my $data_class = 'Fork::ParallelJob::Data::' . $format;
       load_class($data_class);
-      $self->{$key . '_data'}  ||= $data_class->new(base_dir => $self->tmp_name . "-$key-"  . $self->{'name'});
+      my %opt = (
+                 storage => {
+                             class    => 'File',
+                             base_dir => $self->tmp_name . "-$key-"  . $self->{'name'},
+                            },
+                 %{$self->{storage} || {}},
+                );
+      $self->{$key . '_data'}  ||= $data_class->new(%opt);
     }
     $self->{root_data} ||= $self->current_data;
   }

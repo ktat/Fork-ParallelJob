@@ -2,38 +2,50 @@ package Fork::ParallelJob::Data;
 
 use strict;
 use warnings;
-use Fcntl qw/:DEFAULT :flock/;
-use File::Path qw/make_path/;
+use Class::Load qw/load_class/;
 
 my $first_cleanup = 0;
 
 sub new {
   my $klass = shift;
   my %args = @_;
-  die "mandatory parameter:base_dir is missing"
-    unless $args{base_dir};
-
   my $self = bless {
-                    worker_id => $$,
+                    worker_id => undef,
                     format    => 'Storable',
+                    storage   => {
+                                  class  => 'File',
+                                 },
                     %args,
                    }, $klass;
 
+  unless ($self->{storage_object}) {
+    my $storage_class = 'Fork::ParallelJob::Storage::' . delete $self->{storage}->{class};
+    load_class($storage_class);
+    $self->{storage_object} = $storage_class->new($self->{storage});
+    $self->set_worker_id($$) unless $self->worker_id;
+  }
+
   unless ($first_cleanup) {
-    $self->cleanup if -e $args{base_dir};
+    $first_cleanup = 1;
+    $self->storage->cleanup;
   }
-  unless (-e $args{base_dir}) {
-    make_path $args{base_dir}
-      or die "failed to create directory:$args{base_dir}:$!";
-  }
+  $self->storage->prepare;
 
   return $self;
 }
 
+sub storage {
+  my ($self) = @_;
+  $self->{storage_object};
+}
+
 sub set_worker_id {
-  my $self = shift;
-  my $id = shift;
-  $self->{worker_id} = $id if $id;
+  my ($self) = shift;
+  if (@_) {
+    $self->{worker_id} = shift;
+    $self->storage->name($self->{worker_id});
+  }
+  $self->{worker_id};
 }
 
 sub worker_id {
@@ -43,67 +55,29 @@ sub worker_id {
 
 sub cleanup {
   my ($self) = @_;
-  my @files = glob "$self->{base_dir}/status_*";
-  for my $fn (@files) {
-    unlink $fn;
-  }
-  rmdir $self->{base_dir};
-}
-
-sub file_name {
-  my $self = shift;
-  return "$self->{base_dir}/status_" . $self->worker_id;
-}
-
-sub _fh {
-  shift;
-  my $fn = shift;
-  sysopen my $fh, $fn, O_RDWR | O_CREAT or die $!;
-  return $fh;
+  $self->storage->cleanup;
 }
 
 sub lock_store {
   my ($self, $code) = @_;
-  $self->lock(sub { $self->set($code->($self->get)) });
-}
-
-sub lock ($&) {
-  my ($self, $code) = @_;
-  my $fn = $self->file_name;
-  local $@;
-  eval {
-    my $fh = $self->_fh($fn);
-    flock $fh, LOCK_EX;
-    $self->{fh} = $fh;
-    $code->();
-    flock $fh, LOCK_UN;
-    close $fh;
-    delete $self->{fh};
-  };
-  if ($@) {
-    warn $@;
-    return 0;
-  } else {
-    return 1;
-  }
+  $self->storage->lock(sub { $self->set($code->($self->get)) });
 }
 
 sub get {
   my $self = shift;
-  $self->_get(shift || $self->file_name);
+  $self->_deserialize($self->storage->get);
 }
 
 sub set {
   my ($self, $status) = @_;
-  $self->_set($self->file_name, $status);
+  my $s = $self->_serialize($status);
+  $self->storage->set($s);
 }
 
 sub get_all {
   my ($self) = @_;
-  my @files = glob "$self->{base_dir}/status_*";
-  my @data;
-  push @data, $self->get($_) for @files;
-  return \@data;
+  my $size = 0;
+  return [map $self->_deserialize($_), @{$self->storage->get_all}];
 }
 
 sub can_job_store { 0 }

@@ -7,20 +7,14 @@ use warnings;
 
 my $json = JSON::XS->new;
 
-sub _get {
-  my ($self, $filename) = @_;
-  my $fh = $self->{fh} || $self->_fh($filename);
-  seek $fh, 0, 0;
-  local $/;
-  my $data = <$fh>;
-  return $data ? $json->decode($data) : {};
+sub _deserialize {
+  my ($self, $data) = @_;
+  $data ? $json->decode($data) : {};
 }
 
-sub _set {
-  my ($self, $filename, $status) = @_;
-  my $fh = $self->{fh} || $self->_fh($filename);
-  seek $fh, 0, 0;
-  print $fh $json->encode($status);
+sub _serialize {
+  my ($self, $status) = @_;
+  $json->encode($status);
 }
 
 1; # Endo of Fork::ParallelJob::Data::JSON

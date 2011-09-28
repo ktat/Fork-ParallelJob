@@ -10,7 +10,7 @@ my $fork = Fork::ParallelJob->new(max_process => 3, name =>1, data_format => 'YA
 my $pid = $$;
 my $code = sub {
   my $fork = shift;
-  sleep 0.5;
+  sleep 0.2;
   chomp(my $pid_num = qx/ps -ef |grep -E '^$ENV{USER} +[0-9]+ +$pid ' | grep -v 'grep' | wc -l/);
   $fork->current_data->lock_store(sub {my $data = shift; $data->{pid_num} = $pid_num; $data});
   my $child_pid = $$;
@@ -18,13 +18,13 @@ my $code = sub {
   $child->do_fork([
                    (sub {
                       my $fork = shift;
-                      sleep 0.5;
+                      sleep 0.2;
                       chomp(my $pid_num = qx/ps -ef |grep -E '^$ENV{USER} +[0-9]+ +$child_pid ' | grep -v grep| wc -l/);
                       $fork->current_data->lock_store(sub{my $data = shift; $data->{pid_num} = $pid_num; $data});
-                      sleep 0.5;
+                      sleep 0.2;
                     }) x 4,
                    sub {
-                     sleep 0.5;
+                     sleep 0.2;
                      return 0
                    }
                   ]);
