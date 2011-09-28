@@ -8,7 +8,7 @@ use Clone;
 sub new {
   my $class = shift;
   my $pd = shift;
-  my $self = bless {pd => Clone::clone($pd)}, $class;
+  my $self = bless {pd => $pd->clone}, $class;
   $pd->lock_store(
                   sub {
                     my $d = shift;

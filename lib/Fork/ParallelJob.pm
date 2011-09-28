@@ -80,8 +80,9 @@ sub new {
                  storage => {
                              class    => 'File',
                              base_dir => $self->tmp_name . "-$key-"  . $self->{'name'},
+                             %{$self->{storage} || {}
+                             },
                             },
-                 %{$self->{storage} || {}},
                 );
       $self->{$key . '_data'}  ||= $data_class->new(%opt);
     }

@@ -3,6 +3,7 @@ package Fork::ParallelJob::Data;
 use strict;
 use warnings;
 use Class::Load qw/load_class/;
+use Clone;
 
 my $first_cleanup = 0;
 
@@ -19,7 +20,7 @@ sub new {
                    }, $klass;
 
   unless ($self->{storage_object}) {
-    my $storage_class = 'Fork::ParallelJob::Storage::' . delete $self->{storage}->{class};
+    my $storage_class = 'Fork::ParallelJob::Storage::' . $self->{storage}->{class};
     load_class($storage_class);
     $self->{storage_object} = $storage_class->new($self->{storage});
     $self->set_worker_id($$) unless $self->worker_id;
@@ -32,6 +33,15 @@ sub new {
   $self->storage->prepare;
 
   return $self;
+}
+
+sub clone {
+  my $self = shift;
+  my $storage = delete $self->{storage_object};
+  my $clone = Clone::clone($self);
+  $self->{storage_object}  = $storage;
+  $clone->{storage_object} = $storage->clone;
+  $clone;
 }
 
 sub storage {
