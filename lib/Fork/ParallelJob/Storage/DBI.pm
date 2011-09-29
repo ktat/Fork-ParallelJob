@@ -60,6 +60,7 @@ sub lock {
     $dbh->begin_work;
     $code->();
   };
+  $self->{locked} = 0;
   my $err = $@;
   eval {
     if ($err) {
@@ -72,7 +73,6 @@ sub lock {
     }
   };
   die $@ if $@;
-  $self->{locked} = 0;
   $self->{selected} = undef;
   return $ret;
 }
@@ -85,12 +85,14 @@ sub get {
 sub _get {
   my ($self, $name) = @_;
   my $dbh = $self->dbh;
-  my $sth = $dbh->prepare(sprintf('SELECT data FROM %s WHERE name = ? %s', $self->table, $self->{locked} ? 'FOR UPDATE' : ""));
+  my $sth = $dbh->prepare(sprintf('SELECT data, id FROM %s WHERE name = ?', $self->table));
   $sth->execute($name);
   my $data;
   if (my $r = $sth->fetchrow_arrayref) {
     if ($self->{locked}) {
-      $self->{selected} = $name;
+      $sth = $dbh->prepare(sprintf('SELECT data FROM %s WHERE id = ? FOR UPDATE', $self->table));
+      $sth->execute($r->[1]);
+      $self->{selected} = $r->[1];
     }
     $data = $r->[0];
   }
@@ -101,12 +103,13 @@ sub set {
   my ($self, $serialized) = @_;
   my $dbh = $self->dbh;
   my $data_sth;
-  if ($self->{selected}) {
-    $data_sth = $dbh->prepare(sprintf 'UPDATE %s set data = ? WHERE name = ?', $self->table);
+  if (my $id = $self->{selected}) {
+    $data_sth = $dbh->prepare(sprintf 'UPDATE %s set data = ? WHERE id = ?', $self->table);
+    $data_sth->execute($serialized, $id);
   } else {
     $data_sth = $dbh->prepare(sprintf 'INSERT INTO %s (data, name) values(?, ?)', $self->table);
+    $data_sth->execute($serialized, $self->name);
   }
-  $data_sth->execute($serialized, $self->name);
 }
 
 
@@ -145,9 +148,10 @@ Fork::ParallelJob::Storage::DBI -- File storage object for Fork::ParallelJob::Da
 =head1 TABLE DEFINITION
 
  CREATE TABLE job_data (
+   id     integer not null auto_increment,
    name   varchar(255),
    data   blob        ,
-   primary key (name)
+   primary key (id)
  ) ENGINE=InnoDB
 
 =head1 METHOD
