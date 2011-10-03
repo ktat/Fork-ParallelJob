@@ -124,7 +124,7 @@ sub child {
   if ($self->{use_data}) {
     $o->current_data->worker_id($$);
   }
-  $o->{name} = $o->{name} . '-child-' . $$;
+  $o->{name} = $o->{name} . '-child-' . $self->{count} . '-' . $$;
   return $o;
 }
 
@@ -168,7 +168,7 @@ sub do_fork {
       $jobs = ref $data eq 'ARRAY' ? [($jobs) x @$data] : [$jobs];
     } elsif (ref $jobs ne 'ARRAY') {
       if (my $job = $self->jobs->jobs_hash->{$jobs}) {
-        $jobs = [($job) x @$data];
+        $jobs = $data ? [($job) x @$data] : [$job];
       } else {
         Carp::croak("first argument must be ARRAY reference of code reference, 1 code reference, or job_name($jobs) pre-registered with register_jobs: $jobs");
       }
@@ -208,7 +208,7 @@ sub do_fork {
       $self->do_fork;
     } elsif (! $self->{nowait}) {
       $self->wait_all_children;
-      return $self->result;
+      # return $self->result;
     }
   } elsif (defined $pid) {
     # child

@@ -40,7 +40,7 @@ sub file_name {
 sub _fh {
   my $self = shift;
   my $fn = shift;
-  sysopen my $fh, $fn, O_RDWR | O_CREAT or die $!;
+  sysopen my $fh, $fn, O_RDWR | O_CREAT or die "$!: $fn";
   binmode $fh;
   return $fh;
 }
