@@ -9,7 +9,7 @@ use DBI;
 my $fork = Fork::ParallelJob->new(jobs_in_data => 0,
                                   no_data => 1,
                                   sleep => 0,
-                                  max_process => 100,
+                                  max_process => 20,
                                  );
 my $dbh;
 $fork->register_jobs({
@@ -32,7 +32,7 @@ $fork->register_jobs({
                         my $c = $f->child;
                         #warn $file;
                         my @splitted_files = map {$file . '.' . $_} (1 .. 5);
-                        $c->do_fork('parse_insert', [\@splitted_files])
+                        $c->do_fork('parse_insert', \@splitted_files)
                       },
                       parse_insert => sub {
                         my ($f, $files) = @_;
